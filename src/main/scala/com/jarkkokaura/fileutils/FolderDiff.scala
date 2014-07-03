@@ -134,25 +134,29 @@ object FolderDiff extends App {
     val rightMap: Map[String, FileTreeNode] = rightTree.map(indexFn)(breakOut)
 
     var commonPaths: Set[String] = Set()
-    var uniqueLeftNodes: List[FileTreeNode] = Nil
+    var uniqueLeftNodes: IndexedSeq[FileTreeNode] = Vector()
 
     leftMap foreach { pair =>
       if (rightMap.contains(pair._1))
         commonPaths += pair._1
       else
-        uniqueLeftNodes = pair._2 :: uniqueLeftNodes
+        uniqueLeftNodes = uniqueLeftNodes :+ pair._2
     }
 
-    val uniqueRightNodes: List[FileTreeNode] = rightMap.filterKeys(!commonPaths.contains(_)).map(_._2).toList
+    val uniqueRightNodes: IndexedSeq[FileTreeNode] =
+      (for {
+        (path, node) <- rightMap
+        if !commonPaths.contains(path)
+      } yield node)(breakOut)
 
-    val leftOnlyDiffs: List[PathDifference] = uniqueLeftNodes map (ExistsOnlyOnOneSide(LEFT, _))
-    val rightOnlyDiffs: List[PathDifference] = uniqueRightNodes map (ExistsOnlyOnOneSide(RIGHT, _))
+    val leftOnlyDiffs = uniqueLeftNodes map (ExistsOnlyOnOneSide(LEFT, _))
+    val rightOnlyDiffs = uniqueRightNodes map (ExistsOnlyOnOneSide(RIGHT, _))
 
-    val differingNodes: Set[PathDifference] =
-      for {
+    val differingNodes: IndexedSeq[PathDifference] =
+      (for {
         path <- commonPaths
         diff <- leftMap(path).difference(rightMap(path))
-      } yield diff
+      } yield diff)(breakOut)
 
     (leftOnlyDiffs ++ rightOnlyDiffs ++ differingNodes).sorted
   }
