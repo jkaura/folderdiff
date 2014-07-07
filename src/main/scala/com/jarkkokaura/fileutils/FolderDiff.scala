@@ -357,11 +357,10 @@ object FolderDiff extends App {
     (diffTypeOpt, columnFormatInput(true), columnFormatInput(false))
   }
 
-  def formatOutput(resultLines: Seq[PrintLine], formatter: PrintLineFormatter): String = {
+  def getOutputLines(resultLines: Seq[PrintLine], formatter: PrintLineFormatter): Seq[String] =
     resultLines map { l => formatter(getPrintLineFormatterInput(l)) } map {
       (p: PrintLineFormatterOutput) => f"${p.diffType} ${p.left}${p.right}|"
-    } mkString "\n"
-  }
+    }
 
   def printUsageAndExit: Unit = {
     println("Usage: FolderDiff <first_folder> <second_folder>")
@@ -379,6 +378,8 @@ object FolderDiff extends App {
 
   val diffs = differences(collectFileTreeNodes(leftFolder), collectFileTreeNodes(rightFolder))
 
-  println(formatOutput(getPrintLines(diffs), getPrintLineFormatter(diffs)))
+  getOutputLines(getPrintLines(diffs), getPrintLineFormatter(diffs)) foreach { println }
+
+  println("Found " + diffs.size + " differences.")
 
 }
