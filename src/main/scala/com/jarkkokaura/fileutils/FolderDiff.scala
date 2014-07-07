@@ -73,15 +73,17 @@ object FolderDiff extends App {
     def hasSize = properties.size.isDefined
   }
 
+  object DifferenceType extends Enumeration {
+    type DifferenceType = Value
+    val EXISTS_ONLY_ON_ONE_SIDE = Value("MISS")
+    val NODE_TYPE = Value("TYPE")
+    val SIZE = Value
+  }
+  import DifferenceType._
+
   sealed trait PrintLine { val path: Path }
 
   case class ParentFolderLine(path: Path) extends PrintLine
-
-  object DifferenceType extends Enumeration {
-    type DifferenceType = Value
-    val EXISTS_ONLY_ON_ONE_SIDE, NODE_TYPE, SIZE = Value
-  }
-  import DifferenceType._
 
   case class PathDifference(
     diffType: DifferenceType, leftNode: Option[FileTreeNode], rightNode: Option[FileTreeNode])
@@ -164,6 +166,7 @@ object FolderDiff extends App {
     val result: String
     override def toString = result
   }
+  case class DiffTypeString(result: String) extends StringWrapper
   case class NodeTypeString(result: String) extends StringWrapper
   case class PathString(result: String) extends StringWrapper
   case class SizeString(result: String) extends StringWrapper
@@ -184,55 +187,47 @@ object FolderDiff extends App {
 
     val rightPadding = true
 
-    final def apply(opt: Option[T], diffType: Option[DifferenceType]): U = opt match {
+    final def apply(opt: Option[T]): U = opt match {
       case Some(obj) => {
-        val formattedValue = format(obj)
-        val diffMarkedValue =
-          if (!diffType.exists(isDiffField(_)))
-            formattedValue
-          else rightPadding match {
-            case true => formattedValue + "*"
-            case false => "*" + formattedValue
-          }
-
         val padFormatter = if (rightPadding) rightPaddingFormatter else leftPaddingFormatter
-        wrap(padFormatter format diffMarkedValue)
+        wrap(padFormatter format format(obj))
       }
       case None => wrap(empty)
     }
 
     protected def format(t: T): String
-    protected def isDiffField(diffType: DifferenceType): Boolean
     protected def wrap(s: String): U
   }
 
+  case class DiffTypeW(width: Int) extends WidthLike[DiffTypeW] with Formatter[DifferenceType, DiffTypeString] {
+    override def max(that: DiffTypeW) = throw new UnsupportedOperationException
+    protected def format(diffType: DifferenceType) = diffType.toString
+    protected def wrap(s: String) = DiffTypeString(s)
+  }
   case class NodeTypeW(width: Int) extends WidthLike[NodeTypeW] with Formatter[NodeType, NodeTypeString] {
     override def max(that: NodeTypeW) = throw new UnsupportedOperationException
-
     protected def format(nodeType: NodeType) = nodeType.toString
-    protected def isDiffField(diffType: DifferenceType) = diffType == NODE_TYPE
     protected def wrap(s: String) = NodeTypeString(s)
   }
   case class PathW(width: Int) extends WidthLike[PathW] with Formatter[Path, PathString] {
     lazy private[this] val formatter = rightPad(width)
-
     protected def format(path: Path) = INDENT * (path.getNameCount - 1) + path.getFileName.toString
-    protected def isDiffField(diffType: DifferenceType) = diffType == EXISTS_ONLY_ON_ONE_SIDE
     protected def wrap(s: String) = PathString(s)
   }
   case class SizeW(width: Int) extends WidthLike[SizeW] with Formatter[Long, SizeString] {
     override val rightPadding = false
-
     protected def format(size: Long) = size.toString
-    protected def isDiffField(diffType: DifferenceType) = diffType == SIZE
     protected def wrap(s: String) = SizeString(s)
+  }
+
+  object DiffTypeW {
+    private[this] val WIDTH = DifferenceType.values map { _.toString.length } reduce { _ max _ }
+    def apply(): DiffTypeW = DiffTypeW(WIDTH)
   }
 
   object NodeTypeW {
     private[this] val WIDTH = NodeType.values map { _.toString.length } reduce { _ max _ }
-
-    // +1 for diff marker
-    def apply(): NodeTypeW = NodeTypeW(1 + WIDTH)
+    def apply(): NodeTypeW = NodeTypeW(WIDTH)
   }
 
   object PathW {
@@ -250,45 +245,37 @@ object FolderDiff extends App {
         elemIdx += 1
       }
 
-      // +1 for diff marker
-      PathW(1 + maxElemWidth)
+      PathW(maxElemWidth)
     }
 
     implicit def fromInt(i: Int) = PathW(i)
   }
 
   object SizeW {
-    // +1 for diff marker
-    def apply(size: Long): SizeW = SizeW(1 + Math.log10(size).toInt + 1)
-
+    def apply(size: Long): SizeW = SizeW(Math.log10(size).toInt + 1)
     implicit def fromLong(l: Long) = apply(l)
   }
 
-  type ColumnFormatterInput = Either[Path, Option[Tuple2[DifferenceType, FileTreeNode]]]
+  type ColumnFormatterInput = Either[Path, Option[FileTreeNode]]
 
   case class ColumnFormatterOutput(nodeType: NodeTypeString, path: PathString, size: SizeString) {
     override def toString = f"| $nodeType | $path | $size "
   }
 
-  case class PrintLineColumnFormatter(typeFormatter: NodeTypeW, pathFormatter: PathW, sizeFormatter: SizeW) {
-    def accomodate(tuple: (PathW, SizeW)) =
-      PrintLineColumnFormatter(typeFormatter, pathFormatter.max(tuple._1), sizeFormatter.max(tuple._2))
+  case class PrintLineColumnFormatter(nodeTypeFormatter: NodeTypeW, pathFormatter: PathW, sizeFormatter: SizeW) {
+    def accommodate(tuple: (PathW, SizeW)) =
+      PrintLineColumnFormatter(nodeTypeFormatter, pathFormatter.max(tuple._1), sizeFormatter.max(tuple._2))
 
-    def apply(input: ColumnFormatterInput): ColumnFormatterOutput = input match {
-      case Left(path) =>
-        ColumnFormatterOutput(
-          typeFormatter(Some(DIR), None), pathFormatter(Some(path), None), sizeFormatter(None, None))
-      case Right(opt) => opt match {
-        case Some((diffType, node)) => {
-          val diffOpt = Some(diffType)
-          ColumnFormatterOutput(
-            typeFormatter(Some(node.nodeType), diffOpt),
-            pathFormatter(Some(node.path), diffOpt),
-            sizeFormatter(node.properties.size, diffOpt))
+    def apply(input: ColumnFormatterInput): ColumnFormatterOutput = {
+      val (nodeTypeOpt, pathOpt, sizeOpt) = input match {
+        case Left(path) => (Some(DIR), Some(path), None)
+        case Right(opt) => opt match {
+          case Some(FileTreeNode(path, nodeType, NodeProperties(size, _))) => (Some(nodeType), Some(path), size)
+          case None => (None, None, None)
         }
-        case None =>
-          ColumnFormatterOutput(typeFormatter(None, None), pathFormatter(None, None), sizeFormatter(None, None))
       }
+
+      ColumnFormatterOutput(nodeTypeFormatter(nodeTypeOpt), pathFormatter(pathOpt), sizeFormatter(sizeOpt))
     }
   }
 
@@ -296,12 +283,30 @@ object FolderDiff extends App {
     def apply(path: PathW, size: SizeW): PrintLineColumnFormatter = PrintLineColumnFormatter(NodeTypeW(), path, size)
   }
 
-  type PrintLineFormatter = Tuple2[PrintLineColumnFormatter, PrintLineColumnFormatter]
+  type PrintLineFormatterInput = Tuple3[Option[DifferenceType], ColumnFormatterInput, ColumnFormatterInput]
+
+  case class PrintLineFormatterOutput(
+    diffType: DiffTypeString, left: ColumnFormatterOutput, right: ColumnFormatterOutput)
+
+  case class PrintLineFormatter(
+    diffType: DiffTypeW, leftCol: PrintLineColumnFormatter, rightCol: PrintLineColumnFormatter) {
+
+    def apply(input: PrintLineFormatterInput) =
+      PrintLineFormatterOutput(diffType(input._1), leftCol(input._2), rightCol(input._2))
+
+    def accommodate(leftTuple: (PathW, SizeW), rightTuple: (PathW, SizeW)) =
+      PrintLineFormatter(diffType, leftCol.accommodate(leftTuple), rightCol.accommodate(rightTuple))
+  }
+
+  object PrintLineFormatter {
+    def apply(leftCol: PrintLineColumnFormatter, rightCol: PrintLineColumnFormatter): PrintLineFormatter =
+      PrintLineFormatter(DiffTypeW(), leftCol, rightCol)
+  }
 
   def getPrintLineFormatter(diffs: Seq[PathDifference]): PrintLineFormatter = {
-    val init = PrintLineColumnFormatter(0, 0)
+    val initCol = PrintLineColumnFormatter(0, 0)
 
-    diffs.foldLeft(init -> init)((acc: PrintLineFormatter, diff: PathDifference) => {
+    diffs.foldLeft(PrintLineFormatter(initCol, initCol))((acc: PrintLineFormatter, diff: PathDifference) => {
 
       val pathWidth = PathW(diff.path)
 
@@ -318,7 +323,7 @@ object FolderDiff extends App {
 
       val sizeWidths = SizeW(getSize(diff.leftNode)) -> SizeW(getSize(diff.rightNode))
 
-      acc._1.accomodate(pathWidths._1 -> sizeWidths._1) -> acc._2.accomodate(pathWidths._2 -> sizeWidths._2)
+      acc.accommodate(pathWidths._1 -> sizeWidths._1, pathWidths._2 -> sizeWidths._2)
     })
   }
 
@@ -335,29 +340,23 @@ object FolderDiff extends App {
     (diffs ++ parentFolderLines).sortBy(_.path.toString)
   }
 
-  case class PrintLineFormatResult(isDiffLine: Boolean, left: ColumnFormatterOutput, right: ColumnFormatterOutput)
-
-  def formatLine(line: PrintLine, formatter: PrintLineFormatter): PrintLineFormatResult = {
+  def getPrintLineFormatterInput(line: PrintLine): PrintLineFormatterInput = {
     def columnFormatInput: Boolean => ColumnFormatterInput = (selectLeft) => line match {
       case ParentFolderLine(path) => Left(path)
-      case diff@PathDifference(diffType, _, _) => {
-        val nodeOpt = if (selectLeft) diff.leftNode else diff.rightNode
-        nodeOpt match {
-          case Some(node) => Right(Some(diffType, node))
-          case None => Right(None)
-        }
-      }
+      case PathDifference(_, leftNodeOpt, rightNodeOpt) => Right(if (selectLeft) leftNodeOpt else rightNodeOpt)
     }
 
-    val isDiffLine = line.isInstanceOf[PathDifference]
+    val diffTypeOpt = line match {
+      case ParentFolderLine(_) => None
+      case PathDifference(diffType, _, _) => Some(diffType)
+    }
 
-    PrintLineFormatResult(isDiffLine, formatter._1(columnFormatInput(true)), formatter._2(columnFormatInput(false)))
+    (diffTypeOpt, columnFormatInput(true), columnFormatInput(false))
   }
 
   def formatOutput(resultLines: Seq[PrintLine], formatter: PrintLineFormatter): String = {
-    resultLines map { formatLine(_, formatter) } map { (p: PrintLineFormatResult) =>
-      val diffMarker = if (p.isDiffLine) "\u2192" else " "
-      f"$diffMarker ${p.left}${p.right}|"
+    resultLines map { l => formatter(getPrintLineFormatterInput(l)) } map {
+      (p: PrintLineFormatterOutput) => f"${p.diffType} ${p.left}${p.right}|"
     } mkString "\n"
   }
 
