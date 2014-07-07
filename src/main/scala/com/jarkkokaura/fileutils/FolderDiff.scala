@@ -53,19 +53,19 @@ object FolderDiff extends App {
   }
   import NodeType._
 
-  case class NodeTimestamps private (createTime: FileTime, modifyTime: FileTime)
+  case class NodeTimestamps(createTime: FileTime, modifyTime: FileTime)
 
   object NodeTimestamps {
     def apply(attributes: BasicFileAttributes): NodeTimestamps =
       NodeTimestamps(attributes.creationTime, attributes.lastModifiedTime)
   }
 
-  case class NodeProperties private (size: Option[Long], timestamps: NodeTimestamps)
+  case class NodeProperties(size: Option[Long], timestamps: NodeTimestamps)
 
   object NodeProperties {
     def apply(attributes: BasicFileAttributes): NodeProperties = {
-      val size = if (attributes.isRegularFile || attributes.isOther) Some(attributes.size) else None
-      NodeProperties(size, NodeTimestamps(attributes))
+      val sizeOpt = if (attributes.isRegularFile || attributes.isOther) Some(attributes.size) else None
+      NodeProperties(sizeOpt, NodeTimestamps(attributes))
     }
   }
 
@@ -83,7 +83,7 @@ object FolderDiff extends App {
   }
   import DifferenceType._
 
-  case class PathDifference private (
+  case class PathDifference(
     diffType: DifferenceType, leftNode: Option[FileTreeNode], rightNode: Option[FileTreeNode])
     extends Ordered[PathDifference] with PrintLine {
 
@@ -206,7 +206,7 @@ object FolderDiff extends App {
     protected def wrap(s: String): U
   }
 
-  case class NodeTypeW private (width: Int) extends WidthLike[NodeTypeW] with Formatter[NodeType, NodeTypeString] {
+  case class NodeTypeW(width: Int) extends WidthLike[NodeTypeW] with Formatter[NodeType, NodeTypeString] {
     override def max(that: NodeTypeW) = throw new UnsupportedOperationException
 
     protected def format(nodeType: NodeType) = nodeType.toString
@@ -270,7 +270,7 @@ object FolderDiff extends App {
     override def toString = f"| $nodeType | $path | $size "
   }
 
-  case class PrintLineColumnFormatter private (typeFormatter: NodeTypeW, pathFormatter: PathW, sizeFormatter: SizeW) {
+  case class PrintLineColumnFormatter(typeFormatter: NodeTypeW, pathFormatter: PathW, sizeFormatter: SizeW) {
     def accomodate(tuple: (PathW, SizeW)) =
       PrintLineColumnFormatter(typeFormatter, pathFormatter.max(tuple._1), sizeFormatter.max(tuple._2))
 
