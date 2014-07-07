@@ -38,15 +38,18 @@ object FolderDiff extends App {
 
   object NodeType extends Enumeration {
     type NodeType = Value
-    val DIR, FILE, SYM, OTHER = Value
+    val DIRECTORY = Value("DIR")
+    val FILE = Value
+    val SYMBOLIC_LINK = Value("SYM")
+    val OTHER = Value("???")
 
     def apply(fileAttrs: BasicFileAttributes) = {
       if (fileAttrs.isRegularFile)
         FILE
       else if (fileAttrs.isDirectory)
-        DIR
+        DIRECTORY
       else if (fileAttrs.isSymbolicLink)
-        SYM
+        SYMBOLIC_LINK
       else
         OTHER
     }
@@ -127,7 +130,7 @@ object FolderDiff extends App {
 
     val visitor = new SimpleFileVisitor[Path] {
       override def preVisitDirectory(dir: Path, attrs: BasicFileAttributes) = {
-        ret = FileTreeNode(folderPath.relativize(dir), DIR, NodeProperties(attrs)) :: ret
+        ret = FileTreeNode(folderPath.relativize(dir), DIRECTORY, NodeProperties(attrs)) :: ret
         FileVisitResult.CONTINUE
       }
       override def visitFile(file: Path, attrs: BasicFileAttributes) = {
@@ -268,7 +271,7 @@ object FolderDiff extends App {
 
     def apply(input: ColumnFormatterInput): ColumnFormatterOutput = {
       val (nodeTypeOpt, pathOpt, sizeOpt) = input match {
-        case Left(path) => (Some(DIR), Some(path), None)
+        case Left(path) => (Some(DIRECTORY), Some(path), None)
         case Right(opt) => opt match {
           case Some(FileTreeNode(path, nodeType, NodeProperties(size, _))) => (Some(nodeType), Some(path), size)
           case None => (None, None, None)
