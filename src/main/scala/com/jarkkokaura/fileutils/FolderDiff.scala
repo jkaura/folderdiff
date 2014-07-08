@@ -43,7 +43,7 @@ object FolderDiff extends App {
     val SYMBOLIC_LINK = Value("SYM")
     val OTHER = Value("???")
 
-    def apply(fileAttrs: BasicFileAttributes) = {
+    def apply(fileAttrs: BasicFileAttributes) =
       if (fileAttrs.isRegularFile)
         FILE
       else if (fileAttrs.isDirectory)
@@ -52,7 +52,6 @@ object FolderDiff extends App {
         SYMBOLIC_LINK
       else
         OTHER
-    }
   }
   import NodeType._
 
@@ -72,9 +71,7 @@ object FolderDiff extends App {
     }
   }
 
-  case class FileTreeNode(path: Path, nodeType: NodeType, properties: NodeProperties) {
-    def hasSize = properties.size.isDefined
-  }
+  case class FileTreeNode(path: Path, nodeType: NodeType, properties: NodeProperties)
 
   object DifferenceType extends Enumeration {
     type DifferenceType = Value
@@ -115,7 +112,7 @@ object FolderDiff extends App {
 
           if (leftNodeType != rightNodeType)
             Some(PathDifference(NODE_TYPE, leftOpt, rightOpt))
-          else if (leftSizeOpt exists { ls => rightSizeOpt exists { rs => ls != rs } })
+          else if (leftSizeOpt exists { leftSize => rightSizeOpt exists { _ != leftSize } })
             Some(PathDifference(SIZE, leftOpt, rightOpt))
           else
             None
@@ -174,9 +171,7 @@ object FolderDiff extends App {
   case class PathString(result: String) extends StringWrapper
   case class SizeString(result: String) extends StringWrapper
 
-  sealed trait Width {
-    val width: Int
-  }
+  sealed trait Width { val width: Int }
   sealed trait WidthLike[T <: Width] extends Ordered[T] {
     self: T =>
     def compare(that: T) = width compareTo that.width
@@ -313,20 +308,18 @@ object FolderDiff extends App {
 
       val pathWidth = PathW(diff.path)
 
-      val pathWidths: (PathW, PathW) = diff.side match {
+      val (leftPathW: PathW, rightPathW: PathW) = diff.side match {
         case LEFT => (pathWidth, 0)
         case RIGHT => (0, pathWidth)
         case BOTH => (pathWidth, pathWidth)
       }
 
       val getSize = (_: Option[FileTreeNode]) match {
-        case Some(node) => node.properties.size.getOrElse(0L)
+        case Some(FileTreeNode(_, _, NodeProperties(size, _))) => size.getOrElse(0L)
         case _ => 0L
       }
 
-      val sizeWidths = SizeW(getSize(diff.leftNode)) -> SizeW(getSize(diff.rightNode))
-
-      acc.accommodate(pathWidths._1 -> sizeWidths._1, pathWidths._2 -> sizeWidths._2)
+      acc.accommodate(leftPathW -> SizeW(getSize(diff.leftNode)), rightPathW -> SizeW(getSize(diff.rightNode)))
     })
   }
 
@@ -380,6 +373,6 @@ object FolderDiff extends App {
 
   getOutputLines(getPrintLines(diffs), getPrintLineFormatter(diffs)) foreach { println }
 
-  println("Found " + diffs.size + " differences.")
+  printf("Found %d differences.\n", diffs.size)
 
 }
