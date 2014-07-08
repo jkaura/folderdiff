@@ -295,7 +295,7 @@ object FolderDiff extends App {
     diffType: DiffTypeW, leftCol: PrintLineColumnFormatter, rightCol: PrintLineColumnFormatter) {
 
     def apply(input: PrintLineFormatterInput) =
-      PrintLineFormatterOutput(diffType(input._1), leftCol(input._2), rightCol(input._2))
+      PrintLineFormatterOutput(diffType(input._1), leftCol(input._2), rightCol(input._3))
 
     def accommodate(leftTuple: (PathW, SizeW), rightTuple: (PathW, SizeW)) =
       PrintLineFormatter(diffType, leftCol.accommodate(leftTuple), rightCol.accommodate(rightTuple))
