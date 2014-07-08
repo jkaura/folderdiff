@@ -13,6 +13,7 @@ import java.util.Iterator
 import scala.collection.breakOut
 import scala.collection.JavaConversions.asScalaIterator
 import scala.language.implicitConversions
+import scala.language.reflectiveCalls
 
 object FolderDiff extends App {
 
@@ -75,9 +76,10 @@ object FolderDiff extends App {
 
   object DifferenceType extends Enumeration {
     type DifferenceType = Value
-    val EXISTS_ONLY_ON_ONE_SIDE = Value("MISS")
+    val EXISTS_ONLY_ON_ONE_SIDE = Value("N/A")
     val NODE_TYPE = Value("TYPE")
     val SIZE = Value
+    val NAME = Value
   }
   import DifferenceType._
 
@@ -141,9 +143,11 @@ object FolderDiff extends App {
   }
 
   def differences(leftTree: Seq[FileTreeNode], rightTree: Seq[FileTreeNode]): Seq[PathDifference] = {
-    val indexFn = (n: FileTreeNode) => n.path.toString -> n
-    val leftMap: Map[String, FileTreeNode] = leftTree.map(indexFn)(breakOut)
-    val rightMap: Map[String, FileTreeNode] = rightTree.map(indexFn)(breakOut)
+    def pathToString[T <: { val path: Path }](obj: T) = obj.path.toString
+    def indexByPathFn(node: FileTreeNode) = pathToString(node) -> node
+
+    val leftMap: Map[String, FileTreeNode] = leftTree.map(indexByPathFn)(breakOut)
+    val rightMap: Map[String, FileTreeNode] = rightTree.map(indexByPathFn)(breakOut)
 
     val leftDiffs: Seq[PathDifference] =
       (for {
@@ -157,7 +161,57 @@ object FolderDiff extends App {
         diff <- PathDifference(None, Some(rightNode))
       } yield diff)(breakOut)
 
-    (leftDiffs ++ rightOnlyDiffs).sorted
+    val (leftOnlyDiffs, commonPathDiffs) = leftDiffs partition { _.diffType == EXISTS_ONLY_ON_ONE_SIDE }
+
+    def parentPathName(diff: PathDifference) = Option(diff.path.getParent) map { _.toString } getOrElse ""
+
+    val leftOnlyDiffsByDirName = leftOnlyDiffs groupBy parentPathName
+    val rightOnlyDiffsByDirName = rightOnlyDiffs groupBy parentPathName
+
+    val mergedDiffs: Seq[PathDifference] = (for {
+      (parentPathName, leftDiffs) <- leftOnlyDiffsByDirName
+      rightDiffs <- rightOnlyDiffsByDirName.get(parentPathName).toSeq
+      mergedDiff <- mergeSizeMatchingDiffs(leftDiffs, rightDiffs)
+    } yield mergedDiff)(breakOut)
+
+    val mergedDiffPaths: Set[String] =
+      (for {
+        diff <- mergedDiffs
+        nodeOpt <- diff.leftNode :: diff.rightNode :: Nil
+        node <- nodeOpt
+      } yield pathToString(node))(breakOut)
+
+    val notInMergedDiffs = (diff: PathDifference) => !mergedDiffPaths.contains(pathToString(diff))
+
+    val shrankLeftOnlyDiffs = leftOnlyDiffs filter notInMergedDiffs
+    val shrankRightOnlyDiffs = rightOnlyDiffs filter notInMergedDiffs
+
+    val allDiffs = commonPathDiffs ++ shrankLeftOnlyDiffs ++ shrankRightOnlyDiffs ++ mergedDiffs
+
+    allDiffs.sorted
+  }
+
+  def mergeSizeMatchingDiffs(leftDiffs: Seq[PathDifference], rightDiffs: Seq[PathDifference]) = {
+
+    def getSizeOption(diff: PathDifference, side: Side): Option[Long] =
+      (side match {
+        case LEFT => diff.leftNode
+        case RIGHT => diff.rightNode
+      }) map { _.properties.size } getOrElse None
+
+    def getUniqueSizeDiffs(diffs: Seq[PathDifference], side: Side): Map[Long, PathDifference] =
+      diffs
+        .groupBy(getSizeOption(_, side))
+        .filter { (t: Tuple2[Option[Long], Seq[PathDifference]]) => t._1.isDefined && t._2.size == 1 }
+        .map { (t: Tuple2[Option[Long], Seq[PathDifference]]) => t._1.get -> t._2(0) }
+
+    val leftDiffsBySize = getUniqueSizeDiffs(leftDiffs, LEFT)
+    val rightDiffsBySize = getUniqueSizeDiffs(rightDiffs, RIGHT)
+
+    for {
+      (size, leftDiff) <- leftDiffsBySize
+      rightDiff <- rightDiffsBySize get size
+    } yield PathDifference(NAME, leftDiff.leftNode, rightDiff.rightNode)
   }
 
   val INDENT = "  "
